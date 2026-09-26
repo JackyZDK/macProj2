@@ -1,0 +1,21 @@
+[package]
+name = "ip-switcher"
+version = "0.1.0"
+description = "IP 切换器：物理网卡列表 / IP 详情 / 预设静态 IP / 一键切换 DHCP"
+edition = "2021"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true

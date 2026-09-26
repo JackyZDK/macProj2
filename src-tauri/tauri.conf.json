@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "IPSwitcher",
+  "version": "0.1.0",
+  "identifier": "com.macproj2.ipswitcher",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "IP 切换器",
+        "width": 1000,
+        "height": 660,
+        "minWidth": 860,
+        "minHeight": 560,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}

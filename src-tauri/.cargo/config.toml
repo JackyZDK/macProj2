@@ -1,0 +1,10 @@
+# 国内网络环境：crates.io 走 rsproxy 镜像
+# 同时显式置空 http.proxy，避免全局 git 代理（127.0.0.1:26561）被 cargo 继承
+[http]
+proxy = ""
+
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"

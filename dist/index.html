@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IP 切换器</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>IP 切换器</h1>
+      <div id="busy-overlay" class="busy hidden">
+        <span class="spinner"></span><span id="busy-text">处理中…</span>
+      </div>
+    </header>
+
+    <main>
+      <aside id="iface-panel">
+        <h2>物理网卡</h2>
+        <ul id="iface-list"></ul>
+        <button id="refresh-btn" class="secondary">刷新网卡</button>
+      </aside>
+
+      <section id="detail-panel">
+        <h2>网卡 IP 详情 <span id="detail-service"></span></h2>
+        <dl id="iface-detail"></dl>
+      </section>
+
+      <section id="action-panel">
+        <h2>静态 IP 预设</h2>
+        <ul id="preset-list"></ul>
+        <div class="preset-actions">
+          <button id="apply-ip-btn" class="primary" disabled>设置 IP</button>
+          <button id="apply-dhcp-btn" class="primary" disabled>切换 DHCP</button>
+          <button id="add-preset-btn" class="secondary">＋ 新增预设</button>
+        </div>
+        </section>
+    </main>
+
+    <footer id="status-bar">就绪</footer>
+  </div>
+
+  <!-- 新增预设模态弹窗 -->
+  <div id="preset-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="preset-form-title">新增预设</h3>
+        <button type="button" id="close-modal-btn" class="modal-close" title="关闭">&times;</button>
+      </div>
+      <form id="preset-form" class="preset-form">
+        <input id="p-name" type="text" placeholder="预设名称（如：办公网）" required />
+        <div class="form-row">
+          <input id="p-ip" type="text" placeholder="IP 地址" required />
+          <input id="p-netmask" type="text" placeholder="子网掩码" required />
+        </div>
+        <div class="form-row">
+          <input id="p-gateway" type="text" placeholder="网关" required />
+          <input id="p-dns" type="text" placeholder="DNS（逗号分隔）" required />
+        </div>
+        <div class="form-row">
+          <button type="submit" class="primary">保存预设</button>
+          <button type="button" id="cancel-preset-btn" class="secondary">取消</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
