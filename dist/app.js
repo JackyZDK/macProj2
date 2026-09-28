@@ -107,13 +107,21 @@ function renderDetail(iface) {
     return;
   }
   detailService.textContent = `（${iface.service}）`;
+  const statusText = { active: "已连接", inactive: "未连接" }[iface.status] || iface.status || "";
   const rows = [
+    ["硬件端口", iface.hardware_port],
     ["设备", iface.device],
     ["配置方式", iface.config_mode],
+    ["接口状态", statusText],
     ["IP 地址", iface.ip],
     ["子网掩码", iface.netmask],
     ["网关", iface.gateway],
     ["DNS", iface.dns.join(", ")],
+    ["MAC 地址", iface.mac],
+    ["MTU", iface.mtu],
+    ["IPv6 配置", iface.ipv6_mode],
+    ["IPv6 地址", iface.ipv6],
+    ["IPv6 网关", iface.ipv6_router],
   ];
   ifaceDetail.innerHTML = "";
   for (const [label, value] of rows) {

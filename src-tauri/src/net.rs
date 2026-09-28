@@ -23,6 +23,18 @@ pub struct InterfaceInfo {
     pub netmask: String,
     pub gateway: String,
     pub dns: Vec<String>,
+    /// MAC 地址（Ethernet Address）
+    pub mac: String,
+    /// 接口状态：active / inactive
+    pub status: String,
+    /// MTU 值
+    pub mtu: String,
+    /// IPv6 配置方式：Automatic / Manual / Off / Link-local only
+    pub ipv6_mode: String,
+    /// IPv6 地址
+    pub ipv6: String,
+    /// IPv6 网关
+    pub ipv6_router: String,
 }
 
 /// 静态 IP 预设：IP + 子网掩码 + 网关 + DNS
@@ -68,7 +80,11 @@ fn fetch_interface_detail(
 ) -> Result<InterfaceInfo, String> {
     let info = run("networksetup", &["-getinfo", service])?;
     let dns = run("networksetup", &["-getdnsservers", service]).unwrap_or_default();
-    Ok(parse_interface_detail(service, hw_port, device, &info, &dns))
+    let mac = run("networksetup", &["-getmacaddress", service]).unwrap_or_default();
+    let ifconfig = run("ifconfig", &[device]).unwrap_or_default();
+    Ok(parse_interface_detail(
+        service, hw_port, device, &info, &dns, &mac, &ifconfig,
+    ))
 }
 
 /// 解析 `networksetup -listnetworkserviceorder` 输出，得到 (服务名, 硬件端口, 设备) 列表。
@@ -116,18 +132,23 @@ fn parse_service_order(text: &str) -> Result<Vec<(String, String, String)>, Stri
     Ok(entries)
 }
 
-/// 从 `-getinfo` 与 `-getdnsservers` 输出解析单张网卡的详情。
+/// 从 `-getinfo`、`-getdnsservers`、`-getmacaddress` 与 `ifconfig` 输出解析单张网卡的详情。
 fn parse_interface_detail(
     service: &str,
     hw_port: &str,
     device: &str,
     info: &str,
     dns: &str,
+    mac_out: &str,
+    ifconfig_out: &str,
 ) -> InterfaceInfo {
     let mut config_mode = "未知".to_string();
     let mut ip = String::new();
     let mut netmask = String::new();
     let mut gateway = String::new();
+    let mut ipv6_mode = String::new();
+    let mut ipv6 = String::new();
+    let mut ipv6_router = String::new();
 
     for line in info.lines() {
         let l = line.trim();
@@ -144,6 +165,8 @@ fn parse_interface_detail(
             };
             continue;
         }
+        // 注意匹配顺序：先匹配更长的 "IPv6 IP address:" / "IPv6 Router:"，
+        // 再匹配 "IPv6:"（因为 "IPv6 IP address:" 不以 "IPv6:" 开头，顺序其实互不影响）
         if let Some(v) = l.strip_prefix("IP address:") {
             let v = v.trim();
             if v != "none" && !v.is_empty() {
@@ -159,6 +182,21 @@ fn parse_interface_detail(
             if v != "none" && !v.is_empty() {
                 gateway = v.to_string();
             }
+        } else if let Some(v) = l.strip_prefix("IPv6 IP address:") {
+            let v = v.trim();
+            if v != "none" && !v.is_empty() {
+                ipv6 = v.to_string();
+            }
+        } else if let Some(v) = l.strip_prefix("IPv6 Router:") {
+            let v = v.trim();
+            if v != "none" && !v.is_empty() {
+                ipv6_router = v.to_string();
+            }
+        } else if let Some(v) = l.strip_prefix("IPv6:") {
+            let v = v.trim();
+            if !v.is_empty() {
+                ipv6_mode = v.to_string();
+            }
         }
     }
 
@@ -173,6 +211,8 @@ fn parse_interface_detail(
         }
     }
 
+    let (status, mtu) = parse_ifconfig(ifconfig_out);
+
     InterfaceInfo {
         service: service.to_string(),
         hardware_port: hw_port.to_string(),
@@ -182,7 +222,57 @@ fn parse_interface_detail(
         netmask,
         gateway,
         dns: dns_list,
+        mac: parse_mac(mac_out),
+        status,
+        mtu,
+        ipv6_mode,
+        ipv6,
+        ipv6_router,
     }
+}
+
+/// 从 `networksetup -getmacaddress` 输出中提取 MAC 地址（兼容新旧两种格式）。
+fn parse_mac(text: &str) -> String {
+    for line in text.lines() {
+        for token in line.split_whitespace() {
+            let t = token.trim_end_matches('.');
+            if is_mac(t) {
+                return t.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// 校验形如 xx:xx:xx:xx:xx:xx 的 MAC 地址
+fn is_mac(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    parts.len() == 6
+        && parts
+            .iter()
+            .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// 从 `ifconfig <interface>` 输出中提取 (status, mtu)
+fn parse_ifconfig(text: &str) -> (String, String) {
+    let mut status = String::new();
+    let mut mtu = String::new();
+    for line in text.lines() {
+        let l = line.trim();
+        if let Some(v) = l.strip_prefix("status:") {
+            status = v.trim().to_string();
+        }
+        let tokens: Vec<&str> = l.split_whitespace().collect();
+        for (i, t) in tokens.iter().enumerate() {
+            if *t == "mtu" {
+                if let Some(n) = tokens.get(i + 1) {
+                    mtu = n.to_string();
+                }
+                break;
+            }
+        }
+    }
+    (status, mtu)
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +517,26 @@ Router: none
 IPv6: Automatic
 "#;
 
+    const SAMPLE_IPV6_INFO: &str = r#"DHCP Configuration
+
+IP address: 10.6.172.22
+Subnet mask: 255.255.0.0
+Router: 10.6.0.1
+IPv6: Automatic
+IPv6 IP address: fe80::1c22:fbff:fea1:b2c3%en0
+IPv6 Router: fe80::1c22:fbff:fea1:b2c3%en0
+"#;
+
+    const SAMPLE_IFCONFIG: &str = r#"en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=6463<RXCSUM,TXCSUM,VLAN_MTU,TSO4,TSO6,CHANNEL_IO,PARTIAL_CSUM,ZEROINV_CSUM>
+	ether 3c:22:fb:a1:b2:c3
+	inet6 fe80::1c22:fbff:fea1:b2c3%en0 prefixlen 64 secured scopeid 0x4
+	inet 192.168.1.162 netmask 0xffffff00 broadcast 192.168.1.255
+	mediamtu: 1500
+	media: autoselect
+	status: active
+"#;
+
     #[test]
     fn parses_service_order_and_filters_non_en() {
         let entries = parse_service_order(SAMPLE_ORDER).unwrap();
@@ -443,28 +553,40 @@ IPv6: Automatic
 
     #[test]
     fn parses_manual_detail() {
-        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_MANUAL_INFO, SAMPLE_MANUAL_INFO);
+        let iface = parse_interface_detail(
+            "Wi-Fi", "Wi-Fi", "en0", SAMPLE_MANUAL_INFO, SAMPLE_MANUAL_INFO, SAMPLE_MANUAL_INFO, SAMPLE_IFCONFIG,
+        );
         assert_eq!(iface.config_mode, "手动");
         assert_eq!(iface.ip, "192.168.1.100");
         assert_eq!(iface.netmask, "255.255.255.0");
         assert_eq!(iface.gateway, "192.168.1.1");
+        assert_eq!(iface.mac, "3c:22:fb:a1:b2:c3");
+        assert_eq!(iface.ipv6_mode, "Automatic");
+        assert_eq!(iface.ipv6, "");
+        assert_eq!(iface.status, "active");
+        assert_eq!(iface.mtu, "1500");
         // Ethernet Address 等不应被误解析为 DNS
         assert!(iface.dns.is_empty());
     }
 
     #[test]
     fn parses_dhcp_detail() {
-        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_DHCP_INFO, "8.8.8.8\n1.1.1.1\n");
+        let iface = parse_interface_detail(
+            "Wi-Fi", "Wi-Fi", "en0", SAMPLE_DHCP_INFO, "8.8.8.8\n1.1.1.1\n", "", "",
+        );
         assert_eq!(iface.config_mode, "DHCP");
         assert_eq!(iface.ip, "10.6.172.22");
         assert_eq!(iface.netmask, "255.255.0.0");
         assert_eq!(iface.gateway, "10.6.0.1");
         assert_eq!(iface.dns, vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()]);
+        assert_eq!(iface.ipv6_mode, "Automatic");
+        assert_eq!(iface.ipv6, "");
+        assert_eq!(iface.mac, "");
     }
 
     #[test]
     fn parses_no_ip_detail() {
-        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_NO_IP_INFO, "");
+        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_NO_IP_INFO, "", "", "");
         assert_eq!(iface.config_mode, "DHCP");
         assert_eq!(iface.ip, "");
         assert_eq!(iface.gateway, "");
@@ -474,8 +596,48 @@ IPv6: Automatic
     fn parses_dns_with_auto_message() {
         let dns =
             "There aren't any DNS Servers set on Wi-Fi.\n2026:db8::1\n".to_string();
-        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_DHCP_INFO, &dns);
+        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_DHCP_INFO, &dns, "", "");
         assert!(iface.dns.is_empty(), "自动 DNS 与 IPv6 不应被收进 IPv4 DNS 列表");
+    }
+
+    #[test]
+    fn parses_ipv6_fields() {
+        let iface = parse_interface_detail("Wi-Fi", "Wi-Fi", "en0", SAMPLE_IPV6_INFO, "", "", "");
+        assert_eq!(iface.ipv6_mode, "Automatic");
+        assert_eq!(iface.ipv6, "fe80::1c22:fbff:fea1:b2c3%en0");
+        assert_eq!(iface.ipv6_router, "fe80::1c22:fbff:fea1:b2c3%en0");
+    }
+
+    #[test]
+    fn parses_mac_both_formats() {
+        // 新版格式：Wi-Fi en0 has an active Ethernet hardware address of XX:XX:...
+        let modern = parse_mac("Wi-Fi en0 has an active Ethernet hardware address of 3c:22:fb:a1:b2:c3");
+        assert_eq!(modern, "3c:22:fb:a1:b2:c3");
+        // 旧版格式：Ethernet Address: XX:XX:...
+        let legacy = parse_mac("Ethernet Address: aa:bb:cc:dd:ee:ff");
+        assert_eq!(legacy, "aa:bb:cc:dd:ee:ff");
+        // 空输出
+        assert_eq!(parse_mac(""), "");
+    }
+
+    #[test]
+    fn parses_ifconfig_status_and_mtu() {
+        let (status, mtu) = parse_ifconfig(SAMPLE_IFCONFIG);
+        assert_eq!(status, "active");
+        // "mediamtu: 1500" 不应被误当成 mtu（要求 token 恰为 "mtu"）
+        assert_eq!(mtu, "1500");
+        let (s2, m2) = parse_ifconfig("en0: flags=... mtu 1280\n\tstatus: inactive");
+        assert_eq!(s2, "inactive");
+        assert_eq!(m2, "1280");
+    }
+
+    #[test]
+    fn validates_mac_format() {
+        assert!(is_mac("3c:22:fb:a1:b2:c3"));
+        assert!(is_mac("AA:BB:CC:DD:EE:FF"));
+        assert!(!is_mac("3c22fba1b2c3"));
+        assert!(!is_mac("3c:22:fb:a1:b2"));
+        assert!(!is_mac("2001:db8:1:2:3:4")); // IPv6 六段不是 MAC（段长 4，非 2）
     }
 
     #[test]
@@ -543,8 +705,19 @@ IPv6: Automatic
         println!("本机物理网卡数：{}", ifaces.len());
         for i in &ifaces {
             println!(
-                "- {} (device={}, mode={}, ip={}, mask={}, gw={}, dns={:?})",
-                i.service, i.device, i.config_mode, i.ip, i.netmask, i.gateway, i.dns
+                "- {} (device={}, mode={}, ip={}, mask={}, gw={}, dns={:?}, mac={}, status={}, mtu={}, ipv6_mode={}, ipv6={})",
+                i.service,
+                i.device,
+                i.config_mode,
+                i.ip,
+                i.netmask,
+                i.gateway,
+                i.dns,
+                i.mac,
+                i.status,
+                i.mtu,
+                i.ipv6_mode,
+                i.ipv6
             );
         }
         assert!(!ifaces.is_empty(), "应至少发现一张物理网卡");
