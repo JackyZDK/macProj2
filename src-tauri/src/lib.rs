@@ -36,6 +36,18 @@ fn save_presets(presets: Vec<Preset>) -> Result<(), String> {
     net::save_presets(&presets)
 }
 
+/// 前端侧动作记日志（如新增/删除预设、手动刷新网卡）
+#[tauri::command]
+fn log_action(action: String, detail: String, result: String, message: String) {
+    net::append_log(&action, &detail, &result, &message);
+}
+
+/// 查询日志（最新在前，最多 500 条）
+#[tauri::command]
+fn list_logs() -> Result<Vec<net::LogEntry>, String> {
+    net::list_logs()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -43,7 +55,9 @@ pub fn run() {
             set_static_ip,
             set_dhcp,
             load_presets,
-            save_presets
+            save_presets,
+            log_action,
+            list_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

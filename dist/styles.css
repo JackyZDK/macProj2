@@ -260,3 +260,44 @@ footer.ok { color: var(--ok); }
 .modal-close:hover { color: var(--text); background: var(--bg); }
 
 .preset-form { border: none; border-radius: 0; padding: 0; }
+
+.header-actions { display: flex; align-items: center; gap: 10px; }
+
+/* 日志弹窗 */
+.logs-modal { width: 640px; max-width: calc(100vw - 48px); }
+#logs-list {
+  list-style: none;
+  overflow: auto;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#logs-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+#logs-list .empty {
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  text-align: center;
+  padding: 14px;
+}
+.log-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.log-action { font-weight: 600; }
+.log-time { color: var(--muted); flex: 1; }
+.log-result {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.log-result.success { background: #d1fae5; color: #065f46; }
+.log-result.fail { background: #fee2e2; color: #991b1b; }
+.log-detail { color: var(--muted); word-break: break-all; }
+.log-message { word-break: break-all; }

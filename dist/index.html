@@ -10,8 +10,11 @@
   <div id="app">
     <header>
       <h1>IP 切换器</h1>
-      <div id="busy-overlay" class="busy hidden">
-        <span class="spinner"></span><span id="busy-text">处理中…</span>
+      <div class="header-actions">
+        <div id="busy-overlay" class="busy hidden">
+          <span class="spinner"></span><span id="busy-text">处理中…</span>
+        </div>
+        <button id="logs-btn" class="secondary">查看日志</button>
       </div>
     </header>
 
@@ -63,6 +66,17 @@
           <button type="button" id="cancel-preset-btn" class="secondary">取消</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- 操作日志弹窗 -->
+  <div id="logs-modal" class="modal-overlay" hidden>
+    <div class="modal logs-modal">
+      <div class="modal-header">
+        <h3>操作日志</h3>
+        <button type="button" id="close-logs-btn" class="modal-close" title="关闭">&times;</button>
+      </div>
+      <ul id="logs-list"></ul>
     </div>
   </div>
 

@@ -50,10 +50,12 @@ async function refreshInterfaces() {
     renderIfaces();
     renderDetail(selectedService ? interfaces.find((i) => i.service === selectedService) : null);
     setStatus(interfaces.length ? `已发现 ${interfaces.length} 张物理网卡` : "未发现物理网卡（en* 设备）", interfaces.length ? undefined : "error");
+    return true;
   } catch (err) {
     setStatus(`读取网卡失败：${err}`, "error");
     ifaceList.innerHTML = "";
     renderDetail(null);
+    return false;
   } finally {
     setBusy(false);
   }
@@ -199,12 +201,87 @@ async function deletePreset(name) {
     renderPresets();
     updateActionButtons();
     setStatus(`已删除预设「${name}」`);
+    recordLog("delete_preset", `名称「${name}」`, "success", "预设已删除");
   } catch (err) {
     // 保存失败：回滚本地状态并重读磁盘
     await refreshPresets();
     setStatus(`删除预设失败：${err}`, "error");
+    recordLog("delete_preset", `名称「${name}」`, "fail", String(err));
   }
 }
+
+// ---------------------------------------------------------------------------
+// 日志
+// ---------------------------------------------------------------------------
+function recordLog(action, detail, result, message) {
+  invoke("log_action", { action, detail, result, message }).catch(() => {
+    // 日志写入失败不影响主流程
+  });
+}
+
+const ACTION_LABELS = {
+  set_static_ip: "设置 IP",
+  set_dhcp: "切换 DHCP",
+  add_preset: "新增预设",
+  delete_preset: "删除预设",
+  refresh_interfaces: "刷新网卡",
+};
+
+const logsModal = $("logs-modal");
+const logsList = $("logs-list");
+
+async function openLogs() {
+  logsModal.hidden = false;
+  logsList.innerHTML = '<li class="empty">加载中…</li>';
+  try {
+    const logs = await invoke("list_logs");
+    renderLogs(logs);
+  } catch (err) {
+    logsList.innerHTML = `<li class="empty">读取日志失败：${err}</li>`;
+  }
+}
+
+function closeLogs() {
+  logsModal.hidden = true;
+}
+
+function renderLogs(logs) {
+  if (logs.length === 0) {
+    logsList.innerHTML = '<li class="empty">暂无日志</li>';
+    return;
+  }
+  logsList.innerHTML = "";
+  for (const log of logs) {
+    const li = document.createElement("li");
+
+    const head = document.createElement("div");
+    head.className = "log-item-head";
+    const act = document.createElement("span");
+    act.className = "log-action";
+    act.textContent = ACTION_LABELS[log.action] || log.action;
+    const time = document.createElement("span");
+    time.className = "log-time";
+    time.textContent = log.time;
+    const result = document.createElement("span");
+    result.className = `log-result ${log.result === "success" ? "success" : "fail"}`;
+    result.textContent = log.result === "success" ? "成功" : "失败";
+    head.append(act, time, result);
+
+    const detail = document.createElement("div");
+    detail.className = "log-detail";
+    detail.textContent = log.detail;
+
+    const msg = document.createElement("div");
+    msg.className = "log-message";
+    msg.textContent = log.message;
+
+    li.append(head, detail, msg);
+    logsList.appendChild(li);
+  }
+}
+
+$("logs-btn").addEventListener("click", openLogs);
+$("close-logs-btn").addEventListener("click", closeLogs);
 
 // ---------------------------------------------------------------------------
 // 预设表单（新增，模态弹窗）
@@ -255,9 +332,11 @@ $("preset-form").addEventListener("submit", async (e) => {
     renderPresets();
     updateActionButtons();
     setStatus(`已保存预设「${name}」`);
+    recordLog("add_preset", `名称「${name}」IP=${ip} 掩码=${netmask} 网关=${gateway} DNS=${dns.join("、")}`, "success", "预设已保存");
   } catch (err) {
     presets = presets.filter((p) => p.name !== name);
     setStatus(`保存预设失败：${err}`, "error");
+    recordLog("add_preset", `名称「${name}」`, "fail", String(err));
   }
 });
 
@@ -319,7 +398,15 @@ applyDhcpBtn.addEventListener("click", async () => {
   }
 });
 
-$("refresh-btn").addEventListener("click", refreshInterfaces);
+$("refresh-btn").addEventListener("click", async () => {
+  const ok = await refreshInterfaces();
+  recordLog(
+    "refresh_interfaces",
+    `当前发现 ${interfaces.length} 张物理网卡`,
+    ok ? "success" : "fail",
+    ok ? "刷新完成" : "刷新失败"
+  );
+});
 
 // ---------------------------------------------------------------------------
 // 初始化

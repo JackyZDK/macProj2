@@ -314,19 +314,35 @@ pub fn set_static_ip(
         shq(service),
         dns_args
     );
-    run_privileged(&shell)?;
-
-    Ok(ApplyResult {
-        success: true,
-        message: format!(
-            "已为「{}」设置静态 IP：{}\n子网掩码：{}\n网关：{}\nDNS：{}",
-            service,
-            ip,
-            netmask,
-            gateway,
-            dns.join("、")
-        ),
-    })
+    let message = format!(
+        "已为「{}」设置静态 IP：{}\n子网掩码：{}\n网关：{}\nDNS：{}",
+        service,
+        ip,
+        netmask,
+        gateway,
+        dns.join("、")
+    );
+    let detail = format!(
+        "服务「{}」 IP={} 掩码={} 网关={} DNS={}",
+        service,
+        ip,
+        netmask,
+        gateway,
+        dns.join("、")
+    );
+    match run_privileged(&shell) {
+        Ok(_) => {
+            append_log("set_static_ip", &detail, "success", &message);
+            Ok(ApplyResult {
+                success: true,
+                message,
+            })
+        }
+        Err(e) => {
+            append_log("set_static_ip", &detail, "fail", &e);
+            Err(e)
+        }
+    }
 }
 
 /// 将指定服务切换为 DHCP 自动获取（同时清空手动 DNS，恢复使用 DHCP 下发的 DNS）。
@@ -336,11 +352,21 @@ pub fn set_dhcp(service: &str) -> Result<ApplyResult, String> {
         shq(service),
         shq(service)
     );
-    run_privileged(&shell)?;
-    Ok(ApplyResult {
-        success: true,
-        message: format!("「{}」已切换为 DHCP 自动获取 IP，手动 DNS 已重置。", service),
-    })
+    let message = format!("「{}」已切换为 DHCP 自动获取 IP，手动 DNS 已重置。", service);
+    let detail = format!("服务「{}」切换为 DHCP", service);
+    match run_privileged(&shell) {
+        Ok(_) => {
+            append_log("set_dhcp", &detail, "success", &message);
+            Ok(ApplyResult {
+                success: true,
+                message,
+            })
+        }
+        Err(e) => {
+            append_log("set_dhcp", &detail, "fail", &e);
+            Err(e)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +402,94 @@ pub fn save_presets(presets: &[Preset]) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(presets).map_err(|e| format!("序列化预设失败：{}", e))?;
     std::fs::write(&path, json).map_err(|e| format!("写入预设文件失败：{}", e))
+}
+
+// ---------------------------------------------------------------------------
+// 日志记录
+// ---------------------------------------------------------------------------
+
+/// 一条操作日志
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub time: String,
+    pub action: String,
+    pub detail: String,
+    pub result: String, // success / fail
+    pub message: String,
+}
+
+fn logs_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "无法确定用户主目录（HOME 未设置）".to_string())?;
+    Ok(PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("IPSwitcher")
+        .join("logs.jsonl"))
+}
+
+/// 当前本地时间字符串（调用系统 date 命令，避免引入时间库依赖）。
+fn now_local() -> String {
+    if let Ok(out) = Command::new("date").args(["+%Y-%m-%d %H:%M:%S"]).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    // 兜底：Unix 时间戳
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
+}
+
+/// 追加一条日志（JSONL 格式）。日志写入失败不阻断主流程。
+pub fn append_log(action: &str, detail: &str, result: &str, message: &str) {
+    let path = match logs_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let entry = LogEntry {
+        time: now_local(),
+        action: action.to_string(),
+        detail: detail.to_string(),
+        result: result.to_string(),
+        message: message.to_string(),
+    };
+    let json = match serde_json::to_string(&entry) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let _ = writeln!(file, "{json}");
+    }
+}
+
+/// 读取日志，最新在前，最多返回 500 条。
+pub fn list_logs() -> Result<Vec<LogEntry>, String> {
+    let path = logs_path()?;
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("读取日志文件失败：{}", e)),
+    };
+    let mut logs: Vec<LogEntry> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    logs.reverse();
+    if logs.len() > 500 {
+        logs.truncate(500);
+    }
+    Ok(logs)
 }
 
 // ---------------------------------------------------------------------------
@@ -638,6 +752,26 @@ IPv6 Router: fe80::1c22:fbff:fea1:b2c3%en0
         assert!(!is_mac("3c22fba1b2c3"));
         assert!(!is_mac("3c:22:fb:a1:b2"));
         assert!(!is_mac("2001:db8:1:2:3:4")); // IPv6 六段不是 MAC（段长 4，非 2）
+    }
+
+    #[test]
+    fn logs_append_and_list_roundtrip() {
+        let tmp = std::env::temp_dir().join(format!("ipswitcher-log-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::set_var("HOME", &tmp);
+        append_log("set_dhcp", "服务「Wi-Fi」切换为 DHCP", "success", "已切换");
+        append_log("add_preset", "办公网", "fail", "名称已存在");
+        let logs = list_logs().expect("应能读取日志");
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].action, "add_preset", "最新一条应在前");
+        assert_eq!(logs[0].result, "fail");
+        assert_eq!(logs[1].action, "set_dhcp");
+        assert!(!logs[0].time.is_empty(), "时间戳不应为空");
+        // 文件存在且为 JSONL
+        let content = std::fs::read_to_string(tmp.join("Library/Application Support/IPSwitcher/logs.jsonl"))
+            .expect("日志文件应存在");
+        assert_eq!(content.lines().count(), 2);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
