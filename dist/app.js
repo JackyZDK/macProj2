@@ -96,6 +96,7 @@ function renderIfaces() {
 function selectIface(service) {
   if (selectedService === service) return;
   selectedService = service;
+  trafficPrev = null; // 切换网卡时重置速率基线
   renderIfaces();
   renderDetail(interfaces.find((i) => i.service === service));
 }
@@ -209,6 +210,62 @@ async function deletePreset(name) {
     recordLog("delete_preset", `名称「${name}」`, "fail", String(err));
   }
 }
+
+// ---------------------------------------------------------------------------
+// 流量统计
+// ---------------------------------------------------------------------------
+function formatBytes(n) {
+  if (n === 0) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+let trafficPrev = null; // { device, rxBytes, txBytes, at }
+
+function renderTraffic(stats) {
+  const els = {
+    "t-rx-rate": stats ? `${formatBytes(stats.rxRate)}/s` : "—",
+    "t-tx-rate": stats ? `${formatBytes(stats.txRate)}/s` : "—",
+    "t-rx-total": stats ? formatBytes(stats.rxBytes) : "—",
+    "t-tx-total": stats ? formatBytes(stats.txBytes) : "—",
+  };
+  for (const [id, text] of Object.entries(els)) {
+    $(id).textContent = text;
+  }
+}
+
+async function refreshTraffic() {
+  const iface = interfaces.find((i) => i.service === selectedService);
+  if (!iface) {
+    trafficPrev = null;
+    renderTraffic(null);
+    return;
+  }
+  try {
+    const t = await invoke("get_traffic", { device: iface.device });
+    const now = Date.now();
+    let rxRate = 0;
+    let txRate = 0;
+    if (trafficPrev && trafficPrev.device === iface.device) {
+      const dt = (now - trafficPrev.at) / 1000;
+      if (dt >= 1) {
+        rxRate = Math.max(0, t.rx_bytes - trafficPrev.rxBytes) / dt;
+        txRate = Math.max(0, t.tx_bytes - trafficPrev.txBytes) / dt;
+      }
+    }
+    trafficPrev = { device: iface.device, rxBytes: t.rx_bytes, txBytes: t.tx_bytes, at: now };
+    renderTraffic({ rxBytes: t.rx_bytes, txBytes: t.tx_bytes, rxRate, txRate });
+  } catch (_) {
+    trafficPrev = null;
+    renderTraffic(null);
+  }
+}
+
+// 每 2 秒刷新一次流量；跳过繁忙状态避免叠加
+setInterval(refreshTraffic, 2000);
+refreshTraffic();
 
 // ---------------------------------------------------------------------------
 // 日志

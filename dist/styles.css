@@ -63,7 +63,7 @@ main {
   overflow: auto;
 }
 @media (min-width: 900px) {
-  main { grid-template-columns: 240px 320px 1fr; }
+  main { grid-template-columns: 220px minmax(0, 1fr) 340px; }
 }
 
 aside, section {
@@ -301,3 +301,37 @@ footer.ok { color: var(--ok); }
 .log-result.fail { background: #fee2e2; color: #991b1b; }
 .log-detail { color: var(--muted); word-break: break-all; }
 .log-message { word-break: break-all; }
+
+/* 流量统计 */
+.traffic-panel {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.traffic-panel h2 { font-size: 13px; }
+.traffic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.traffic-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.t-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.t-value {
+  font-weight: 600;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

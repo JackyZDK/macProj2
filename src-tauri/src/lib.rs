@@ -48,6 +48,12 @@ fn list_logs() -> Result<Vec<net::LogEntry>, String> {
     net::list_logs()
 }
 
+/// 读取指定接口的累计收发字节数
+#[tauri::command]
+fn get_traffic(device: String) -> Result<net::TrafficStats, String> {
+    net::get_traffic(&device)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -57,7 +63,8 @@ pub fn run() {
             load_presets,
             save_presets,
             log_action,
-            list_logs
+            list_logs,
+            get_traffic
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

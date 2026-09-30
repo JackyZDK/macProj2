@@ -28,6 +28,27 @@
       <section id="detail-panel">
         <h2>网卡 IP 详情 <span id="detail-service"></span></h2>
         <dl id="iface-detail"></dl>
+        <div class="traffic-panel">
+          <h2>流量统计</h2>
+          <div class="traffic-grid">
+            <div class="traffic-item">
+              <span class="t-label">下载速率</span>
+              <span class="t-value" id="t-rx-rate">—</span>
+            </div>
+            <div class="traffic-item">
+              <span class="t-label">上传速率</span>
+              <span class="t-value" id="t-tx-rate">—</span>
+            </div>
+            <div class="traffic-item">
+              <span class="t-label">累计接收</span>
+              <span class="t-value" id="t-rx-total">—</span>
+            </div>
+            <div class="traffic-item">
+              <span class="t-label">累计发送</span>
+              <span class="t-value" id="t-tx-total">—</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="action-panel">

@@ -493,6 +493,75 @@ pub fn list_logs() -> Result<Vec<LogEntry>, String> {
 }
 
 // ---------------------------------------------------------------------------
+// 流量统计
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrafficStats {
+    pub device: String,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+}
+
+/// 读取指定接口自启用以来的累计收发字节数（netstat -ib）。
+pub fn get_traffic(device: &str) -> Result<TrafficStats, String> {
+    let out = run("netstat", &["-ib"])?;
+    parse_netstat_traffic(device, &out)
+}
+
+/// 解析 `netstat -ib` 输出：定位接口的 <Link#> 行并取 Ibytes / Obytes。
+/// 兼容 Address 列为空（如 lo0）导致的列偏移。
+fn parse_netstat_traffic(device: &str, text: &str) -> Result<TrafficStats, String> {
+    let mut cols: usize = 0;
+    let mut rx_idx: Option<usize> = None;
+    let mut tx_idx: Option<usize> = None;
+
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.is_empty() {
+            continue;
+        }
+        if fields[0].eq_ignore_ascii_case("name") {
+            cols = fields.len();
+            for (i, f) in fields.iter().enumerate() {
+                if f.eq_ignore_ascii_case("ibytes") {
+                    rx_idx = Some(i);
+                }
+                if f.eq_ignore_ascii_case("obytes") {
+                    tx_idx = Some(i);
+                }
+            }
+            continue;
+        }
+        if fields[0] != device {
+            continue;
+        }
+        // <Link#> 在 Network 列；无 Address 值（如 lo0）时整行会少一列
+        if fields.iter().any(|f| f.starts_with("<Link")) {
+            let (ri, ti) = match (rx_idx, tx_idx) {
+                (Some(a), Some(b)) => (a, b),
+                _ => return Err("无法解析 netstat 表头".to_string()),
+            };
+            let shift = if fields.len() == cols { 0 } else { 1 };
+            let rx = fields
+                .get(ri.saturating_sub(shift))
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            let tx = fields
+                .get(ti.saturating_sub(shift))
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            return Ok(TrafficStats {
+                device: device.to_string(),
+                rx_bytes: rx,
+                tx_bytes: tx,
+            });
+        }
+    }
+    Err(format!("未找到接口 {device} 的流量数据"))
+}
+
+// ---------------------------------------------------------------------------
 // 基础工具
 // ---------------------------------------------------------------------------
 
@@ -775,6 +844,27 @@ IPv6 Router: fe80::1c22:fbff:fea1:b2c3%en0
     }
 
     #[test]
+    fn parses_netstat_traffic() {
+        let sample = r#"Name  Mtu   Network       Address            Ipkts Ierrs    Ibytes    Opkts Oerrs    Obytes  Coll
+lo0    16384  <Link#1>                       855006     0   87850616   855006     0   87850616     0
+en0    1500   <Link#5>    3c:22:fb:a1:b2:c3    1000     0  123456789      900     0  987654321     0
+en0    1500   fe80::1/64  fe80::1%en0           10      0       800       10      0       900       0
+en0    1500   192.168.1.0/24 192.168.1.162     20      0      2000       20      0      2000       0
+"#;
+        let s = parse_netstat_traffic("en0", sample).expect("应解析出 en0 流量");
+        assert_eq!(s.rx_bytes, 123456789, "应取 <Link#> 行，而非按 IP 行");
+        assert_eq!(s.tx_bytes, 987654321);
+        // Address 为空的 Link 行（如 lo0）存在列偏移，应仍能正确解析
+        let s_lo = parse_netstat_traffic("lo0", sample).expect("应解析出 lo0 流量");
+        assert_eq!(s_lo.rx_bytes, 87850616);
+        assert_eq!(s_lo.tx_bytes, 87850616);
+        assert_eq!(
+            parse_netstat_traffic("en9", sample).unwrap_err(),
+            "未找到接口 en9 的流量数据"
+        );
+    }
+
+    #[test]
     fn builds_static_ip_shell_command() {
         let dns = vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()];
         let shell = format!(
@@ -830,7 +920,7 @@ IPv6 Router: fe80::1c22:fbff:fea1:b2c3%en0
         );
     }
 
-    /// 真机只读集成测试：列出本机物理网卡与详情。
+    /// 真机只读集成测试：列出本机物理网卡与详情 + 流量。
     /// 仅执行只读命令，不改动任何网络配置。运行：cargo test -- --ignored
     #[test]
     #[ignore]
@@ -853,6 +943,15 @@ IPv6 Router: fe80::1c22:fbff:fea1:b2c3%en0
                 i.ipv6_mode,
                 i.ipv6
             );
+            if !i.device.is_empty() {
+                match get_traffic(&i.device) {
+                    Ok(t) => println!(
+                        "    流量(累计收/发)：{} bytes / {} bytes",
+                        t.rx_bytes, t.tx_bytes
+                    ),
+                    Err(e) => println!("    流量读取失败：{e}"),
+                }
+            }
         }
         assert!(!ifaces.is_empty(), "应至少发现一张物理网卡");
         for i in &ifaces {
